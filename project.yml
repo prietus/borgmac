@@ -56,6 +56,12 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: ""
         INFOPLIST_KEY_CFBundleDisplayName: BorgMac
         INFOPLIST_KEY_LSUIElement: YES
+        # Reading the Wi-Fi name (for schedules limited to certain
+        # networks) requires Location Services authorization on macOS 14+.
+        INFOPLIST_KEY_NSLocationUsageDescription: "BorgMac reads the name of your Wi-Fi network so backups can be limited to the networks you choose. Your location is never used or stored."
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "BorgMac reads the name of your Wi-Fi network so backups can be limited to the networks you choose. Your location is never used or stored."
+        INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription: "BorgMac reads the name of your Wi-Fi network so backups can be limited to the networks you choose. Your location is never used or stored."
+        CODE_SIGN_ENTITLEMENTS: BorgMac/BorgMac.entitlements
 
   BorgMacWidget:
     type: app-extension

@@ -107,7 +107,11 @@ WIDGET_ENTITLEMENTS="$PROJECT_DIR/BorgMacWidget/BorgMacWidget.entitlements"
 codesign --force --options runtime --timestamp \
     --entitlements "$WIDGET_ENTITLEMENTS" \
     --sign "$SIGN_ID" "$WIDGET_APPEX"
+# The app itself needs the location entitlement under the hardened
+# runtime, otherwise Location Services (and with it the Wi-Fi name used
+# by network-restricted schedules) is silently denied.
 codesign --force --options runtime --timestamp \
+    --entitlements "$PROJECT_DIR/BorgMac/BorgMac.entitlements" \
     --sign "$SIGN_ID" "$APP_OUT"
 
 echo "==> Verifying signature..."

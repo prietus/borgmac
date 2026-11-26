@@ -45,6 +45,8 @@ brew install borgbackup-fuse    # same, plus FUSE support for mounting archives
 
 - Manual backups with exclude patterns, progress, and cancellation.
 - Any number of schedules per repository, installed as launchd agents. Retries with backoff, native notifications on success or failure, and a "Run now" button.
+- Missed backups are caught up: if the Mac was off (or BorgMac wasn't running) when a schedule was due, the backup starts as soon as BorgMac launches, the Mac wakes, or it joins an allowed network. Can be turned off per schedule.
+- Schedules can be limited to specific Wi-Fi networks (e.g. only at home). On any other network the run is skipped, not failed, and made up once the Mac is back on an allowed network. macOS only reveals the Wi-Fi name to apps with Location Services access, so BorgMac asks for it when you enable this.
 - Archive browser with full-tree search, Quick Look previews, and restore of single files or whole folders.
 - File history: see every version of a path across all archives.
 - Treemap of what takes up space inside an archive.

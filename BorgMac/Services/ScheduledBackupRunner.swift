@@ -157,6 +157,16 @@ enum ScheduledBackupRunner {
             )
             return false
         }
+        // Wi-Fi restriction: skip (not fail) when the Mac is on a network
+        // the schedule isn't allowed to use. The status keeps the old
+        // lastRun/lastSuccess so the GUI catches the slot up as soon as
+        // the Mac joins an allowed network.
+        if let reason = WiFiNetwork.skipReason(for: schedule) {
+            fputs("[\(Date())] skipping: \(reason)\n", stdout)
+            markSkipped(scheduleId: scheduleId, reason: reason)
+            return true
+        }
+
         guard let passphrase = Keychain.unattendedPassphrase(for: repoId) else {
             finalizeFailure(
                 scheduleId: scheduleId, repoId: repoId, repoName: repo.name,
@@ -447,6 +457,13 @@ enum ScheduledBackupRunner {
         // the UI doesn't carry stale data from the previous try.
         clearProgressFields(&status)
         status.progressStartedAt = Date()
+        BackupStatusFile.write(status, for: scheduleId)
+    }
+
+    private static func markSkipped(scheduleId: UUID, reason: String) {
+        var status = BackupStatusFile.read(for: scheduleId) ?? BackupRunStatus()
+        status.lastSkipped = Date()
+        status.lastSkipReason = reason
         BackupStatusFile.write(status, for: scheduleId)
     }
 

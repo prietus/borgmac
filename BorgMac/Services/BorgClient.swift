@@ -192,6 +192,14 @@ actor BorgClient {
         _ = try await run(args, passphrase: pass, sshKeyPath: repo.sshKeyPath)
     }
 
+    /// `--lock-wait` for headless (scheduled) runs. Borg's default is to
+    /// give up after 1 s when another process holds the repository lock,
+    /// e.g. a second schedule of the same repo or a manual backup. Waiting
+    /// instead lets parallel runs queue up rather than fail. Ten minutes
+    /// is long enough for a typical incremental backup to finish; a lock
+    /// left behind by a crashed process still surfaces as an error.
+    static let unattendedLockWait = ["--lock-wait", "600"]
+
     /// Create backup with an externally supplied passphrase — skips the
     /// Keychain/biometric path. Used by scheduled runs under launchd.
     /// When `onProgress` is non-nil, passes `--log-json --progress` so
@@ -206,7 +214,7 @@ actor BorgClient {
         onProgress: (@Sendable (BorgProgress) -> Void)? = nil,
         onLaunch: (@Sendable (pid_t) -> Void)? = nil
     ) async throws {
-        var args = ["create", "--stats", "--compression", "lz4"]
+        var args = ["create"] + Self.unattendedLockWait + ["--stats", "--compression", "lz4"]
         if onProgress != nil {
             args += ["--log-json", "--progress"]
         }
@@ -328,7 +336,7 @@ actor BorgClient {
         keepWeekly: Int,
         keepMonthly: Int
     ) async throws {
-        var args = ["prune", "--list"]
+        var args = ["prune"] + Self.unattendedLockWait + ["--list"]
         if keepDaily > 0 { args += ["--keep-daily", String(keepDaily)] }
         if keepWeekly > 0 { args += ["--keep-weekly", String(keepWeekly)] }
         if keepMonthly > 0 { args += ["--keep-monthly", String(keepMonthly)] }
@@ -338,7 +346,7 @@ actor BorgClient {
         // here must not fail the prune, but it should not vanish either —
         // the headless runner's log is the only place to see it.
         do {
-            _ = try await run(["compact", repo.url], passphrase: passphrase, sshKeyPath: repo.sshKeyPath)
+            _ = try await run(["compact"] + Self.unattendedLockWait + [repo.url], passphrase: passphrase, sshKeyPath: repo.sshKeyPath)
         } catch {
             fputs("compact failed: \(error.localizedDescription)\n", stderr)
         }

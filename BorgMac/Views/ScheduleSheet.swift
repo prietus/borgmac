@@ -193,6 +193,12 @@ private struct ScheduleRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let skip = skipLine {
+                    Text(skip)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
             }
             Spacer()
             if let status = statusStore.status(for: schedule.id), status.running == true {
@@ -232,7 +238,22 @@ private struct ScheduleRow: View {
         }
         let pathCount = schedule.paths.count
         let pathText = pathCount == 1 ? "1 path" : "\(pathCount) paths"
-        return "\(freq) · \(pathText)"
+        var line = "\(freq) · \(pathText)"
+        if schedule.isNetworkRestricted {
+            line += " · Wi-Fi: " + schedule.allowedWiFiNetworks.joined(separator: ", ")
+        }
+        return line
+    }
+
+    /// Shown when the most recent decision was a skip (e.g. wrong Wi-Fi)
+    /// rather than a run.
+    private var skipLine: String? {
+        guard let status = statusStore.status(for: schedule.id),
+              let skipped = status.lastSkipped,
+              let reason = status.lastSkipReason,
+              skipped > (status.lastRun ?? .distantPast) else { return nil }
+        let when = skipped.formatted(date: .abbreviated, time: .shortened)
+        return "Skipped \(when): \(reason)"
     }
 }
 
@@ -256,11 +277,18 @@ struct ScheduleEditorSheet: View {
     @State private var keepDaily: Int
     @State private var keepWeekly: Int
     @State private var keepMonthly: Int
+    @State private var catchUpMissedRuns: Bool
+    @State private var restrictToWiFi: Bool
+    @State private var allowedWiFiNetworks: [String]
+    @State private var newWiFiNetwork: String = ""
+    @ObservedObject private var wifi: WiFiMonitor
     @State private var error: String?
     @State private var busy = false
 
+    @MainActor
     init(repositoryId: UUID, existing: BackupSchedule?) {
         self.repositoryId = repositoryId
+        _wifi = ObservedObject(wrappedValue: WiFiMonitor.shared)
         self.existing = existing
         let s = existing ?? BackupSchedule()
         _name        = State(initialValue: s.name)
@@ -271,6 +299,9 @@ struct ScheduleEditorSheet: View {
         _keepDaily   = State(initialValue: s.keepDaily)
         _keepWeekly  = State(initialValue: s.keepWeekly)
         _keepMonthly = State(initialValue: s.keepMonthly)
+        _catchUpMissedRuns = State(initialValue: s.catchUpMissedRuns)
+        _restrictToWiFi = State(initialValue: s.isNetworkRestricted)
+        _allowedWiFiNetworks = State(initialValue: s.allowedWiFiNetworks)
 
         var comps = DateComponents()
         comps.hour = s.hour
@@ -289,6 +320,7 @@ struct ScheduleEditorSheet: View {
                 VStack(alignment: .leading, spacing: 12) {
                     nameSection
                     configForm
+                    networkSection
                     pathsSection
                     excludesSection
                     retentionSection
@@ -351,9 +383,114 @@ struct ScheduleEditorSheet: View {
                         displayedComponents: .hourAndMinute
                     )
                 }
+
+                Toggle("Run missed backups when BorgMac starts", isOn: $catchUpMissedRuns)
+                    .help("If the Mac was off (or BorgMac wasn't running) when this schedule was due, start the backup as soon as BorgMac starts, the Mac wakes, or it joins an allowed Wi-Fi network.")
             }
             .padding(.vertical, 4)
         }
+    }
+
+    @ViewBuilder
+    private var networkSection: some View {
+        GroupBox("Network") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Only run on specific Wi-Fi networks", isOn: $restrictToWiFi)
+                    .onChange(of: restrictToWiFi) { _, on in
+                        if on { wifi.requestAuthorization() }
+                    }
+
+                if restrictToWiFi {
+                    if allowedWiFiNetworks.isEmpty {
+                        Text("No networks yet. Add at least one, or turn the option off.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(Array(allowedWiFiNetworks.enumerated()), id: \.offset) { idx, ssid in
+                            HStack {
+                                Image(systemName: "wifi")
+                                    .foregroundStyle(.secondary)
+                                Text(ssid)
+                                    .font(.caption)
+                                if ssid == wifi.currentSSID {
+                                    Text("current")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button {
+                                    allowedWiFiNetworks.remove(at: idx)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundStyle(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        TextField("Network name (SSID)", text: $newWiFiNetwork)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { commitNewWiFiNetwork() }
+                        Button("Add") { commitNewWiFiNetwork() }
+                            .controlSize(.small)
+                            .disabled(newWiFiNetwork.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+
+                    if let current = wifi.currentSSID {
+                        Button {
+                            if !allowedWiFiNetworks.contains(current) {
+                                allowedWiFiNetworks.append(current)
+                            }
+                        } label: {
+                            Label("Add current network (\(current))", systemImage: "wifi")
+                        }
+                        .controlSize(.small)
+                        .disabled(allowedWiFiNetworks.contains(current))
+                    }
+
+                    if !wifi.isAuthorized {
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "location.slash")
+                                .foregroundStyle(.orange)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("macOS only reveals the Wi-Fi name to apps with Location Services access. Without it, restricted backups are skipped.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Button("Open Location Services settings…") {
+                                    if wifi.authorizationStatus == .notDetermined {
+                                        wifi.requestAuthorization()
+                                    } else if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+                                        NSWorkspace.shared.open(url)
+                                    }
+                                }
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+
+                    Text("When the Mac is on another network, the scheduled run is skipped and made up as soon as it joins one of these networks.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear {
+            wifi.refresh()
+            if restrictToWiFi { wifi.requestAuthorization() }
+        }
+    }
+
+    private func commitNewWiFiNetwork() {
+        let trimmed = newWiFiNetwork.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if !allowedWiFiNetworks.contains(trimmed) {
+            allowedWiFiNetworks.append(trimmed)
+        }
+        newWiFiNetwork = ""
     }
 
     @ViewBuilder
@@ -535,6 +672,11 @@ struct ScheduleEditorSheet: View {
             return
         }
 
+        if restrictToWiFi && allowedWiFiNetworks.isEmpty {
+            error = "Add at least one Wi-Fi network, or turn off the network restriction."
+            return
+        }
+
         guard var repo = store.repositories.first(where: { $0.id == repositoryId }) else {
             error = "Repository not found."
             return
@@ -552,6 +694,8 @@ struct ScheduleEditorSheet: View {
         schedule.keepDaily = keepDaily
         schedule.keepWeekly = keepWeekly
         schedule.keepMonthly = keepMonthly
+        schedule.catchUpMissedRuns = catchUpMissedRuns
+        schedule.allowedWiFiNetworks = restrictToWiFi ? allowedWiFiNetworks : []
 
         do {
             try ScheduleManager.install(repoId: repositoryId, schedule: schedule)

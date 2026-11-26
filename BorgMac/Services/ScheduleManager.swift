@@ -160,6 +160,40 @@ enum ScheduleManager {
         }
     }
 
+    /// The most recent slot at or before `date` at which the schedule was
+    /// supposed to fire. Used by the catch-up logic to decide whether a
+    /// run was missed (Mac shut down, app not running, …).
+    ///
+    /// Hourly schedules use launchd's `StartInterval`, which has no fixed
+    /// phase, so their "previous slot" is simply one interval ago.
+    static func previousFireDate(for schedule: BackupSchedule, before date: Date = Date()) -> Date? {
+        let cal = Calendar.current
+        switch schedule.frequency {
+        case .hourly:
+            return date.addingTimeInterval(-3600)
+
+        case .daily:
+            var comps = cal.dateComponents([.year, .month, .day], from: date)
+            comps.hour = schedule.hour
+            comps.minute = schedule.minute
+            guard let candidate = cal.date(from: comps) else { return nil }
+            if candidate <= date { return candidate }
+            return cal.date(byAdding: .day, value: -1, to: candidate)
+
+        case .weekly:
+            let targetCalWeekday = schedule.weekday + 1
+            let currentWeekday = cal.component(.weekday, from: date)
+            let daysBack = (currentWeekday - targetCalWeekday + 7) % 7
+            guard let base = cal.date(byAdding: .day, value: -daysBack, to: date) else { return nil }
+            var candComps = cal.dateComponents([.year, .month, .day], from: base)
+            candComps.hour = schedule.hour
+            candComps.minute = schedule.minute
+            guard let candidate = cal.date(from: candComps) else { return nil }
+            if candidate <= date { return candidate }
+            return cal.date(byAdding: .day, value: -7, to: candidate)
+        }
+    }
+
     // MARK: - Plist generation
 
     private static func makePlist(repoId: UUID, schedule: BackupSchedule, binary: String) -> String {

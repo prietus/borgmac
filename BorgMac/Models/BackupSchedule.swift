@@ -31,6 +31,21 @@ struct BackupSchedule: Codable, Hashable, Identifiable {
     var keepDaily: Int = 0
     var keepWeekly: Int = 0
     var keepMonthly: Int = 0
+    /// Wi-Fi network names (SSIDs) this schedule may run on. Empty means
+    /// "any network". When non-empty, a run that fires while the Mac is on
+    /// another network (or not on Wi-Fi at all) is skipped, not failed.
+    var allowedWiFiNetworks: [String] = []
+    /// When true, the GUI starts this schedule right away at launch (and
+    /// when the Mac joins an allowed Wi-Fi) if its last scheduled slot was
+    /// missed, e.g. because the Mac was shut down at that time.
+    var catchUpMissedRuns: Bool = true
+    /// When the schedule was created. Used as the reference for catch-up
+    /// before the first run has happened. Nil for schedules saved before
+    /// this field existed.
+    var createdAt: Date?
+
+    /// True when the schedule is limited to specific Wi-Fi networks.
+    var isNetworkRestricted: Bool { !allowedWiFiNetworks.isEmpty }
 
     /// True when any `--keep-*` value is set, i.e. the scheduled run
     /// should prune (and compact) the repository after backing up.
@@ -52,6 +67,9 @@ struct BackupSchedule: Codable, Hashable, Identifiable {
         keepDaily   = try c.decodeIfPresent(Int.self,    forKey: .keepDaily)   ?? 0
         keepWeekly  = try c.decodeIfPresent(Int.self,    forKey: .keepWeekly)  ?? 0
         keepMonthly = try c.decodeIfPresent(Int.self,    forKey: .keepMonthly) ?? 0
+        allowedWiFiNetworks = try c.decodeIfPresent([String].self, forKey: .allowedWiFiNetworks) ?? []
+        catchUpMissedRuns = try c.decodeIfPresent(Bool.self, forKey: .catchUpMissedRuns) ?? true
+        createdAt   = try c.decodeIfPresent(Date.self,   forKey: .createdAt)
     }
 
     init(
@@ -65,7 +83,10 @@ struct BackupSchedule: Codable, Hashable, Identifiable {
         excludes: [String] = [],
         keepDaily: Int = 0,
         keepWeekly: Int = 0,
-        keepMonthly: Int = 0
+        keepMonthly: Int = 0,
+        allowedWiFiNetworks: [String] = [],
+        catchUpMissedRuns: Bool = true,
+        createdAt: Date? = Date()
     ) {
         self.id = id
         self.name = name
@@ -78,6 +99,9 @@ struct BackupSchedule: Codable, Hashable, Identifiable {
         self.keepDaily = keepDaily
         self.keepWeekly = keepWeekly
         self.keepMonthly = keepMonthly
+        self.allowedWiFiNetworks = allowedWiFiNetworks
+        self.catchUpMissedRuns = catchUpMissedRuns
+        self.createdAt = createdAt
     }
 
     /// Human-readable label used in the UI. Falls back to the frequency if
@@ -148,4 +172,11 @@ struct BackupRunStatus: Codable, Hashable {
     /// completion), the GUI rewrites the status as failed so the
     /// "in progress" UI doesn't wedge forever.
     var runnerPid: Int32?
+
+    /// When the runner last decided not to run (e.g. not on an allowed
+    /// Wi-Fi network). A skip is not a failure: `lastRun` / `lastError`
+    /// are left untouched so the missed slot is still caught up later.
+    var lastSkipped: Date?
+    /// Human-readable reason for `lastSkipped`.
+    var lastSkipReason: String?
 }

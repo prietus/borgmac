@@ -36,6 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UNUserNotificationCenter.current().delegate = notificationDelegate
         Notifications.bootstrap()
 
+        // Watch the Wi-Fi network (for schedules limited to certain
+        // networks) and catch up on backups missed while the Mac was off.
+        WiFiMonitor.shared.start()
+        CatchUpScheduler.shared.start()
+
         let nc = NotificationCenter.default
         nc.addObserver(
             self,
